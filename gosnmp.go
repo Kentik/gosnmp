@@ -552,9 +552,8 @@ func (x *GoSNMP) WalkAll(rootOid string) (results []SnmpPDU, err error) {
 // length 3, Partition returns true for the currentPosition having
 // the following values:
 //
-// 0  1  2  3  4  5  6  7
-//
-//	T        T     T
+//	0  1  2  3  4  5  6  7
+//	      T        T     T
 func Partition(currentPosition, partitionSize, sliceLength int) bool {
 	if currentPosition < 0 || currentPosition >= sliceLength {
 		return false
