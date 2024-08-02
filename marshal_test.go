@@ -1,7 +1,8 @@
-// Copyright 2012-2020 The GoSNMP Authors. All rights reserved.  Use of this
+// Copyright 2012 The GoSNMP Authors. All rights reserved.  Use of this
 // source code is governed by a BSD-style license that can be found in the
 // LICENSE file.
 
+//go:build all || marshal
 // +build all marshal
 
 package gosnmp
@@ -10,7 +11,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"net"
 	"reflect"
@@ -41,7 +42,7 @@ type testsEnmarshalVarbindPosition struct {
 		what's actually happening
 
 		2) for counting byte positions: select "Simple Network Management
-		Protocal" line in Wiresharks middle pane, then right click and choose
+		Protocol" line in Wiresharks middle pane, then right click and choose
 		"Export Packet Bytes..." (as .raw). Open the capture in wireshark, it
 		will decode as "BER Encoded File". Click on each varbind and the
 		"packet bytes" window will highlight the corresponding bytes, then the
@@ -166,7 +167,7 @@ var testsEnmarshal = []testsEnmarshalT{
 		0x37, // finish
 		[]testsEnmarshalVarbindPosition{
 			{".1.3.6.1.4.1.2863.205.1.1.75.2.0",
-				0x1e, 0x36, OctetString, "telnet"},
+				0x1e, 0x36, OctetString, []byte("telnet")},
 		},
 	},
 	// MrSpock Set stuff
@@ -234,7 +235,7 @@ var testsEnmarshal = []testsEnmarshalT{
 // vbPosPdus returns a slice of oids in the given test
 func vbPosPdus(test testsEnmarshalT) (pdus []SnmpPDU) {
 	for _, vbp := range test.vbPositions {
-		pdu := SnmpPDU{vbp.oid, vbp.pduType, vbp.pduValue, nil}
+		pdu := SnmpPDU{Name: vbp.oid, Type: vbp.pduType, Value: vbp.pduValue}
 		pdus = append(pdus, pdu)
 	}
 	return
@@ -269,11 +270,11 @@ func checkByteEquality(t *testing.T, test testsEnmarshalT, testBytes []byte,
 // ie check each varbind is working, then the varbind list, etc
 
 func TestEnmarshalVarbind(t *testing.T) {
-	Default.Logger = log.New(ioutil.Discard, "", 0)
+	Default.Logger = NewLogger(log.New(io.Discard, "", 0))
 
 	for _, test := range testsEnmarshal {
 		for j, test2 := range test.vbPositions {
-			snmppdu := &SnmpPDU{test2.oid, test2.pduType, test2.pduValue, nil}
+			snmppdu := &SnmpPDU{Name: test2.oid, Type: test2.pduType, Value: test2.pduValue}
 			testBytes, err := marshalVarbind(snmppdu)
 			if err != nil {
 				t.Errorf("#%s:%d:%s err returned: %v",
@@ -286,7 +287,7 @@ func TestEnmarshalVarbind(t *testing.T) {
 }
 
 func TestEnmarshalVBL(t *testing.T) {
-	Default.Logger = log.New(ioutil.Discard, "", 0)
+	Default.Logger = NewLogger(log.New(io.Discard, "", 0))
 
 	for _, test := range testsEnmarshal {
 		x := &SnmpPacket{
@@ -306,7 +307,7 @@ func TestEnmarshalVBL(t *testing.T) {
 }
 
 func TestEnmarshalPDU(t *testing.T) {
-	Default.Logger = log.New(ioutil.Discard, "", 0)
+	Default.Logger = NewLogger(log.New(io.Discard, "", 0))
 
 	for _, test := range testsEnmarshal {
 		x := &SnmpPacket{
@@ -327,7 +328,7 @@ func TestEnmarshalPDU(t *testing.T) {
 }
 
 func TestEnmarshalMsg(t *testing.T) {
-	Default.Logger = log.New(ioutil.Discard, "", 0)
+	Default.Logger = NewLogger(log.New(io.Discard, "", 0))
 
 	for _, test := range testsEnmarshal {
 		x := &SnmpPacket{
@@ -365,6 +366,38 @@ func TestEnmarshalMsg(t *testing.T) {
 }
 
 // -- Unmarshal -----------------------------------------------------------------
+
+var testsUnmarshalErr = []struct {
+	in func() []byte
+}{
+	{
+		panicUnmarshalHeader,
+	},
+	{
+		panicUnmarshalV3Header,
+	},
+	{
+		panicUnmarshalUserSecurityModelPacketLen,
+	},
+	{
+		panicUnmarshalV3HeaderFlagLen,
+	},
+	{
+		panicUnmarshalParseFloat32,
+	},
+	{
+		panicUnmarshalParseFloat64,
+	},
+	{
+		panicUnmarshalParseRawFieldTimeTicks,
+	},
+	{
+		panicUnmarshalDecryptPacketIndex,
+	},
+	{
+		panicUnmarshalDecryptNoPriv,
+	},
+}
 
 var testsUnmarshal = []struct {
 	in  func() []byte
@@ -417,7 +450,7 @@ var testsUnmarshal = []struct {
 				{
 					Name:  ".1.3.6.1.2.1.1.3.0",
 					Type:  TimeTicks,
-					Value: 318870100,
+					Value: uint32(318870100),
 				},
 			},
 		},
@@ -454,7 +487,7 @@ var testsUnmarshal = []struct {
 				{
 					Name:  ".1.3.6.1.2.1.2.2.1.9.3",
 					Type:  TimeTicks,
-					Value: 2970,
+					Value: uint32(2970),
 				},
 				{
 					Name:  ".1.3.6.1.2.1.3.1.1.2.10.1.10.11.0.17",
@@ -644,7 +677,7 @@ var testsUnmarshal = []struct {
 				{
 					Name:  ".1.3.6.1.2.1.31.1.1.1.10.1",
 					Type:  Counter64,
-					Value: 1527943,
+					Value: uint64(1527943),
 				},
 			},
 		},
@@ -662,6 +695,23 @@ var testsUnmarshal = []struct {
 					Name:  ".1.3.6.1.4.1.6574.4.2.12.1.0",
 					Type:  OpaqueFloat,
 					Value: float32(10.0),
+				},
+			},
+		},
+	},
+	{opaqueResponse,
+		&SnmpPacket{
+			Version:    Version1,
+			Community:  "public",
+			PDUType:    GetResponse,
+			RequestID:  2033938493,
+			Error:      0,
+			ErrorIndex: 0,
+			Variables: []SnmpPDU{
+				{
+					Name:  ".1.3.6.1.4.1.34187.74195.2.1.24590",
+					Type:  Opaque,
+					Value: []byte{0x41, 0xf0, 0x00, 0x00},
 				},
 			},
 		},
@@ -713,8 +763,48 @@ var testsUnmarshal = []struct {
 	},
 }
 
+func TestUnmarshalErrors(t *testing.T) {
+	Default.Logger = NewLogger(log.New(io.Discard, "", 0))
+
+	for i, test := range testsUnmarshalErr {
+		funcName := runtime.FuncForPC(reflect.ValueOf(test.in).Pointer()).Name()
+		splitedFuncName := strings.Split(funcName, ".")
+		funcName = splitedFuncName[len(splitedFuncName)-1]
+		t.Run(fmt.Sprintf("%v-%v", i, funcName), func(t *testing.T) {
+			vhandle := GoSNMP{}
+			vhandle.Logger = Default.Logger
+			testBytes := test.in()
+			_, err := vhandle.SnmpDecodePacket(testBytes)
+			if err == nil {
+				t.Errorf("#%s: SnmpDecodePacket() err expected, but not returned", funcName)
+			}
+		})
+	}
+}
+
+func FuzzUnmarshal(f *testing.F) {
+	for _, test := range testsUnmarshalErr {
+		f.Add(test.in())
+	}
+
+	for _, test := range testsUnmarshal {
+		f.Add(test.in())
+	}
+
+	vhandle := GoSNMP{}
+	vhandle.Logger = Default.Logger
+	f.Fuzz(func(t *testing.T, data []byte) {
+		stime := time.Now()
+		_, _ = vhandle.SnmpDecodePacket(data)
+
+		if e := time.Since(stime); e > (time.Second * 1) {
+			t.Errorf("SnmpDecodePacket() took too long: %s", e)
+		}
+	})
+}
+
 func TestUnmarshal(t *testing.T) {
-	Default.Logger = log.New(ioutil.Discard, "", 0)
+	Default.Logger = NewLogger(log.New(io.Discard, "", 0))
 
 	for i, test := range testsUnmarshal {
 		funcName := runtime.FuncForPC(reflect.ValueOf(test.in).Pointer()).Name()
@@ -771,7 +861,7 @@ func TestUnmarshal(t *testing.T) {
 						if vbval.Cmp(vbrval) != 0 {
 							t.Errorf("#%d:%d Value result: %v, test: %v", i, n, vbr.Value, vb.Value)
 						}
-					case OctetString:
+					case OctetString, Opaque:
 						if !bytes.Equal(vb.Value.([]byte), vbr.Value.([]byte)) {
 							t.Errorf("#%d:%d Value result: %v, test: %v", i, n, vbr.Value, vb.Value)
 						}
@@ -823,6 +913,148 @@ func TestUnmarshal(t *testing.T) {
 
 * Frame, Ethernet II, IP and UDP layers removed from generated bytes
 */
+
+/*
+panicUnmarshalHeader tests a boundary condition that results in a panic
+when unmarshalling the SNMP header (see also https://github.com/gosnmp/gosnmp/issues/440)
+*/
+func panicUnmarshalHeader() []byte {
+	return []byte("0\x04\x02\x020\x03")
+}
+
+/*
+panicUnmarshalV3Header tests a boundary condition that results in a panic
+when unmarshalling the SNMPv3.
+*/
+func panicUnmarshalV3Header() []byte {
+	return []byte{
+		0x30, 0x81, 0x95, 0x02, 0x01, 0x03, 0x30, 0x30, 0x43, 0x04, 0x30, 0x30, 0x30, 0x30, 0x43, 0x03,
+		0x30, 0x30, 0x30, 0x04, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+		0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+		0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+		0x30, 0x30, 0x30, 0x30, 0x30, 0x04, 0x51, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+		0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+		0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+		0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+		0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+		0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+	}
+}
+
+/*
+panicUnmarshalUserSecurityModelPacketLen() tests a boundary condition that results in a panic
+when indexing into the packet when processing the User Security Model.
+*/
+func panicUnmarshalUserSecurityModelPacketLen() []byte {
+	return []byte{
+		0x30, 0x81, 0x95, 0x02, 0x01, 0x03, 0x30, 0x30, 0x43, 0x04, 0x30, 0x30, 0x30, 0x30, 0x43, 0x03,
+		0x30, 0x30, 0x30, 0x43, 0x01, 0x30, 0x43, 0x01, 0x30, 0x04, 0xfd, 0x30, 0x30, 0x30, 0x30, 0x30,
+		0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+		0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+		0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+		0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+		0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+		0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+		0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+		0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+	}
+}
+
+/*
+panicUnmarshalV3HeaderFlagLen tests a boundary condition that results in a panic
+when indexing into Flags without checking the length.
+*/
+func panicUnmarshalV3HeaderFlagLen() []byte {
+	return []byte{
+		0x30, 0x7e, 0x02, 0x01, 0x03, 0x30, 0x30, 0x43, 0x04, 0x30, 0x30, 0x30, 0x30, 0x43, 0x03, 0x30,
+		0x30, 0x30, 0x04, 0x00, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+		0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+		0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+		0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+		0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+		0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+		0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+	}
+}
+
+/*
+panicUnmarshalParseFloat32() tests a boundary condition that results in a panic
+in parseFloat32 when handling malformed data.
+*/
+func panicUnmarshalParseFloat32() []byte {
+	return []byte{
+		0x30, 0x34, 0x43, 0x01, 0x30, 0x43, 0x06, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0xa2, 0x27, 0x43,
+		0x04, 0x30, 0x30, 0x30, 0x30, 0x43, 0x01, 0x30, 0x43, 0x01, 0x30, 0x30, 0x19, 0x30, 0x30, 0x06,
+		0x0c, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x44, 0x07, 0x9f,
+		0x78, 0x00, 0x30, 0x30, 0x30, 0x30,
+	}
+}
+
+/*
+panicUnmarshalParseFloat64() tests a boundary condition that results in a panic
+in parseFloat64 when handling malformed data.
+*/
+func panicUnmarshalParseFloat64() []byte {
+	return []byte{
+		0x30, 0x38, 0x43, 0x01, 0x30, 0x43, 0x06, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0xa2, 0x2b, 0x43,
+		0x04, 0x30, 0x30, 0x30, 0x30, 0x43, 0x01, 0x30, 0x43, 0x01, 0x30, 0x30, 0x1d, 0x30, 0x30, 0x06,
+		0x0c, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x44, 0x0b, 0x9f,
+		0x79, 0x80, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+	}
+}
+
+/*
+panicUnmarshalParseRawFieldTimeTicks() tests a boundary condition that results in a panic
+in parseRawField TimeTicks type when parseLength overflows the length value returning a value
+for cursor that is higher than length.
+*/
+func panicUnmarshalParseRawFieldTimeTicks() []byte {
+	return []byte{
+		0x30, 0x81, 0xc5, 0x43, 0x01, 0x30, 0x43, 0x06, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0xa2, 0x81,
+		0xb7, 0x43, 0x04, 0x30, 0x30, 0x30, 0x30, 0x43, 0x01, 0x30, 0x43, 0xeb, 0x30, 0x30, 0x30, 0x30,
+		0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+		0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+		0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+		0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+		0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+		0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0xff,
+		0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+		0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+		0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+		0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+		0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+	}
+}
+
+/*
+panicUnmarshalDecryptPacketIndex() tests a boundary condition that results in a panic
+in decryptPacket when handling malformed data.
+*/
+func panicUnmarshalDecryptPacketIndex() []byte {
+	return []byte{
+		0x30, 0x52, 0x02, 0x01, 0x03, 0x30, 0x30, 0x43, 0x04, 0x30, 0x30, 0x30, 0x30, 0x43, 0x03, 0x30,
+		0x30, 0x30, 0x43, 0x01, 0x30, 0x43, 0x01, 0x30, 0x04, 0x30, 0x30, 0x30, 0x43, 0x00, 0x43, 0x01,
+		0x30, 0x43, 0x01, 0x30, 0x43, 0x00, 0x43, 0x00, 0x04, 0x2a, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+		0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+		0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+		0x30, 0x30, 0x30, 0x30,
+	}
+}
+
+/*
+panicUnmarshalDecryptPacketIndex() tests a boundary condition that results in a panic
+in UsmSecurityParameters.decryptPacket() when handling malformed data.
+*/
+func panicUnmarshalDecryptNoPriv() []byte {
+	return []byte{
+		0x30, 0x52, 0x02, 0x01, 0x03, 0x30, 0x30, 0x43, 0x04, 0x30, 0x30, 0x30, 0x30, 0x43, 0x03, 0x30,
+		0x30, 0x30, 0x43, 0x01, 0x30, 0x43, 0x01, 0x30, 0x04, 0x30, 0x30, 0x30, 0x43, 0x00, 0x43, 0x01,
+		0x30, 0x43, 0x01, 0x30, 0x43, 0x00, 0x43, 0x00, 0x43, 0x00, 0x04, 0x30, 0x30, 0x30, 0x30, 0x30,
+		0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+		0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+		0x30, 0x30, 0x30, 0x30,
+	}
+}
 
 /*
 kyoceraResponseBytes corresponds to the response section of this snmpget
@@ -1191,7 +1423,8 @@ func ciscoGetnextRequestBytes() []byte {
 	}
 }
 
-/* cisco getbulk bytes corresponds to this snmpbulkget command:
+/*
+	cisco getbulk bytes corresponds to this snmpbulkget command:
 
 $ snmpbulkget -v2c -cpublic  127.0.0.1:161 1.3.6.1.2.1.1.9.1.3.52
 iso.3.6.1.2.1.1.9.1.4.1 = Timeticks: (21) 0:00:00.21
@@ -1204,7 +1437,6 @@ iso.3.6.1.2.1.1.9.1.4.7 = Timeticks: (23) 0:00:00.23
 iso.3.6.1.2.1.1.9.1.4.8 = Timeticks: (23) 0:00:00.23
 iso.3.6.1.2.1.2.1.0 = INTEGER: 3
 iso.3.6.1.2.1.2.2.1.1.1 = INTEGER: 1
-
 */
 func ciscoGetbulkRequestBytes() []byte {
 	return []byte{
@@ -1242,14 +1474,15 @@ func ciscoGetbulkResponseBytes() []byte {
 /*
 Issue 35, empty responses.
 Simple Network Management Protocol
-    version: v2c (1)
-    community: public
-    data: get-request (0)
-        get-request
-            request-id: 1883298028
-            error-status: noError (0)
-            error-index: 0
-            variable-bindings: 0 items
+
+	version: v2c (1)
+	community: public
+	data: get-request (0)
+	    get-request
+	        request-id: 1883298028
+	        error-status: noError (0)
+	        error-index: 0
+	        variable-bindings: 0 items
 */
 func emptyErrRequest() []byte {
 	return []byte{
@@ -1263,14 +1496,15 @@ func emptyErrRequest() []byte {
 Issue 35, empty responses.
 
 Simple Network Management Protocol
-    version: v2c (1)
-    community: public
-    data: get-response (2)
-        get-response
-            request-id: 1883298028
-            error-status: noError (0)
-            error-index: 0
-            variable-bindings: 0 items
+
+	version: v2c (1)
+	community: public
+	data: get-response (2)
+	    get-response
+	        request-id: 1883298028
+	        error-status: noError (0)
+	        error-index: 0
+	        variable-bindings: 0 items
 */
 func emptyErrResponse() []byte {
 	return []byte{
@@ -1284,17 +1518,18 @@ func emptyErrResponse() []byte {
 Issue 15, test Counter64.
 
 Simple Network Management Protocol
-    version: v2c (1)
-    community: public
-    data: get-response (2)
-        get-response
-            request-id: 190378322
-            error-status: noError (0)
-            error-index: 0
-            variable-bindings: 1 item
-                1.3.6.1.2.1.31.1.1.1.10.1: 1527943
-                    Object Name: 1.3.6.1.2.1.31.1.1.1.10.1 (iso.3.6.1.2.1.31.1.1.1.10.1)
-                    Value (Counter64): 1527943
+
+	version: v2c (1)
+	community: public
+	data: get-response (2)
+	    get-response
+	        request-id: 190378322
+	        error-status: noError (0)
+	        error-index: 0
+	        variable-bindings: 1 item
+	            1.3.6.1.2.1.31.1.1.1.10.1: 1527943
+	                Object Name: 1.3.6.1.2.1.31.1.1.1.10.1 (iso.3.6.1.2.1.31.1.1.1.10.1)
+	                Value (Counter64): 1527943
 */
 func counter64Response() []byte {
 	return []byte{
@@ -1307,8 +1542,36 @@ func counter64Response() []byte {
 }
 
 /*
+Issue 370, test Opaque.
+
+Simple Network Management Protocol
+
+	version: 1 (1)
+	community: public
+	data: get-response (2)
+	    get-response
+	        request-id: 2033938493
+	        error-status: noError (0)
+	        error-index: 0
+	        variable-bindings: 1 item
+	            1.3.6.1.4.1.34187.74195.2.1.24590: 41f00000
+	                Object Name: 1.3.6.1.4.1.34187.74195.2.1.24590 (iso.3.6.1.4.1.34187.74195.2.1.24590)
+	                Value (Opaque): 41f00000
+*/
+func opaqueResponse() []byte {
+	return []byte{
+		0x30, 0x35, 0x02, 0x01, 0x00, 0x04, 0x06, 0x70, 0x75, 0x62, 0x6c, 0x69,
+		0x63, 0xa2, 0x28, 0x02, 0x04, 0x79, 0x3b, 0x70, 0x3d, 0x02, 0x01, 0x00,
+		0x02, 0x01, 0x00, 0x30, 0x1a, 0x30, 0x18, 0x06, 0x10, 0x2b, 0x06, 0x01,
+		0x04, 0x01, 0x82, 0x8b, 0x0b, 0x84, 0xc3, 0x53, 0x02, 0x01, 0x81, 0xc0,
+		0x0e, 0x44, 0x04, 0x41, 0xf0, 0x00, 0x00,
+	}
+}
+
+/*
 Opaque Float, observed from Synology NAS UPS MIB
- snmpget -v 2c -c public host 1.3.6.1.4.1.6574.4.2.12.1.0
+
+	snmpget -v 2c -c public host 1.3.6.1.4.1.6574.4.2.12.1.0
 */
 func opaqueFloatResponse() []byte {
 	return []byte{
@@ -1322,13 +1585,14 @@ func opaqueFloatResponse() []byte {
 
 /*
 Opaque Double, not observed, crafted based on description:
- https://tools.ietf.org/html/draft-perkins-float-00
+
+	https://tools.ietf.org/html/draft-perkins-float-00
 */
 func opaqueDoubleResponse() []byte {
 	return []byte{
 		0x30, 0x38, 0x02, 0x01, 0x01, 0x04, 0x06, 0x70, 0x75, 0x62, 0x6c, 0x69,
 		0x63, 0xa2, 0x2b, 0x02, 0x04, 0x23, 0xd5, 0xd7, 0x05, 0x02, 0x01, 0x00,
-		0x02, 0x01, 0x00, 0x30, 0x1d, 0x30, 0x17, 0x06, 0x0c, 0x2b, 0x06, 0x01,
+		0x02, 0x01, 0x00, 0x30, 0x1d, 0x30, 0x1b, 0x06, 0x0c, 0x2b, 0x06, 0x01,
 		0x04, 0x01, 0xb3, 0x2e, 0x04, 0x02, 0x0c, 0x01, 0x00, 0x44, 0x0b, 0x9f,
 		0x79, 0x08, 0x40, 0x24, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 	}
@@ -1345,7 +1609,7 @@ func TestUnmarshalEmptyPanic(t *testing.T) {
 }
 
 func TestV3USMInitialPacket(t *testing.T) {
-	logger := log.New(ioutil.Discard, "", 0)
+	logger := NewLogger(log.New(io.Discard, "", 0))
 	var emptyPdus []SnmpPDU
 	blankPacket := &SnmpPacket{
 		Version:            Version3,
@@ -1360,7 +1624,7 @@ func TestV3USMInitialPacket(t *testing.T) {
 	if err != nil {
 		t.Errorf("#TestV3USMInitialPacket: marshalMsg() err returned: %v", err)
 	}
-	engine := GoSNMP{Logger: logger}
+	engine := GoSNMP{Logger: Default.Logger}
 	pktNew, errDecode := engine.SnmpDecodePacket(iBytes)
 	if errDecode != nil {
 		t.Logf("-->Bytes=%v", iBytes)
@@ -1373,6 +1637,9 @@ func TestV3USMInitialPacket(t *testing.T) {
 
 func TestSendOneRequest_dups(t *testing.T) {
 	srvr, err := net.ListenUDP("udp4", &net.UDPAddr{})
+	if err != nil {
+		t.Fatalf("udp4 error listening: %s", err)
+	}
 	defer srvr.Close()
 
 	x := &GoSNMP{
@@ -1383,7 +1650,7 @@ func TestSendOneRequest_dups(t *testing.T) {
 		Retries: 2,
 	}
 	if err := x.Connect(); err != nil {
-		t.Fatalf("Error connecting: %s", err)
+		t.Fatalf("error connecting: %s", err)
 	}
 
 	go func() {
@@ -1399,17 +1666,17 @@ func TestSendOneRequest_dups(t *testing.T) {
 			var cursor int
 			cursor, err = x.unmarshalHeader(buf, &reqPkt)
 			if err != nil {
-				t.Errorf("Error: %s", err)
+				t.Errorf("error: %s", err)
 			}
 			// if x.Version == Version3 {
 			//	buf, cursor, err = x.decryptPacket(buf, cursor, &reqPkt)
 			//	if err != nil {
-			//		t.Errorf("Error: %s", err)
+			//		t.Errorf("error: %s", err)
 			//	}
 			//}
 			err = x.unmarshalPayload(buf, cursor, &reqPkt)
 			if err != nil {
-				t.Errorf("Error: %s", err)
+				t.Errorf("error: %s", err)
 			}
 
 			rspPkt := x.mkSnmpPacket(GetResponse, []SnmpPDU{
@@ -1431,18 +1698,19 @@ func TestSendOneRequest_dups(t *testing.T) {
 		}
 	}()
 
-	pdus := []SnmpPDU{SnmpPDU{Name: ".1.2", Type: Null}}
-	reqPkt := x.mkSnmpPacket(GetResponse, pdus, 0, 0) //not actually a GetResponse, but we need something our test server can unmarshal
+	pdus := []SnmpPDU{{Name: ".1.2", Type: Null}}
+	// This is not actually a GetResponse, but we need something our test server can unmarshal.
+	reqPkt := x.mkSnmpPacket(GetResponse, pdus, 0, 0)
 
 	_, err = x.sendOneRequest(reqPkt, true)
 	if err != nil {
-		t.Errorf("Error: %s", err)
+		t.Errorf("error: %s", err)
 		return
 	}
 
 	_, err = x.sendOneRequest(reqPkt, true)
 	if err != nil {
-		t.Errorf("Error: %s", err)
+		t.Errorf("error: %s", err)
 		return
 	}
 }
@@ -1451,6 +1719,9 @@ func BenchmarkSendOneRequest(b *testing.B) {
 	b.StopTimer()
 
 	srvr, err := net.ListenUDP("udp4", &net.UDPAddr{})
+	if err != nil {
+		b.Fatalf("udp4 error listening: %s", err)
+	}
 	defer srvr.Close()
 
 	x := &GoSNMP{
@@ -1461,7 +1732,7 @@ func BenchmarkSendOneRequest(b *testing.B) {
 		Retries: 2,
 	}
 	if err := x.Connect(); err != nil {
-		b.Fatalf("Error connecting: %s", err)
+		b.Fatalf("error connecting: %s", err)
 	}
 
 	go func() {
@@ -1478,7 +1749,7 @@ func BenchmarkSendOneRequest(b *testing.B) {
 		}
 	}()
 
-	pdus := []SnmpPDU{SnmpPDU{Name: ".1.3.6.1.2.1.31.1.1.1.10.1", Type: Null}}
+	pdus := []SnmpPDU{{Name: ".1.3.6.1.2.1.31.1.1.1.10.1", Type: Null}}
 	reqPkt := x.mkSnmpPacket(GetRequest, pdus, 0, 0)
 
 	// make sure everything works before starting the test
@@ -1492,9 +1763,93 @@ func BenchmarkSendOneRequest(b *testing.B) {
 	for n := 0; n < b.N; n++ {
 		_, err = x.sendOneRequest(reqPkt, true)
 		if err != nil {
-			b.Fatalf("Error: %s", err)
+			b.Fatalf("error: %s", err)
 			return
 		}
+	}
+}
+
+func TestUnconnectedSocket_fail(t *testing.T) {
+	withUnconnectedSocket(t, false)
+}
+
+func TestUnconnectedSocket_success(t *testing.T) {
+	withUnconnectedSocket(t, true)
+}
+
+func withUnconnectedSocket(t *testing.T, enable bool) {
+	srvr, err := net.ListenUDP("udp", &net.UDPAddr{})
+	if err != nil {
+		t.Fatalf("udp error listening: %s", err)
+	}
+	defer srvr.Close()
+
+	x := &GoSNMP{
+		Version:                 Version2c,
+		Target:                  srvr.LocalAddr().(*net.UDPAddr).IP.String(),
+		Port:                    uint16(srvr.LocalAddr().(*net.UDPAddr).Port),
+		Timeout:                 time.Millisecond * 100,
+		Retries:                 2,
+		UseUnconnectedUDPSocket: enable,
+		LocalAddr:               "0.0.0.0:",
+	}
+	if err := x.Connect(); err != nil {
+		t.Fatalf("error connecting: %s", err)
+	}
+	defer x.Conn.Close()
+
+	go func() {
+		buf := make([]byte, 256)
+		for {
+			n, addr, err := srvr.ReadFrom(buf)
+			if err != nil {
+				return
+			}
+			buf := buf[:n]
+
+			var reqPkt SnmpPacket
+			var cursor int
+			cursor, err = x.unmarshalHeader(buf, &reqPkt)
+			if err != nil {
+				t.Errorf("error: %s", err)
+			}
+			err = x.unmarshalPayload(buf, cursor, &reqPkt)
+			if err != nil {
+				t.Errorf("error: %s", err)
+			}
+
+			rspPkt := x.mkSnmpPacket(GetResponse, []SnmpPDU{
+				{
+					Name:  ".1.2",
+					Type:  Integer,
+					Value: 123,
+				},
+			}, 0, 0)
+			rspPkt.RequestID = reqPkt.RequestID
+			outBuf, err := rspPkt.marshalMsg()
+			if err != nil {
+				t.Errorf("ERR: %s", err)
+			}
+			// Temporary socket will use different source port, it's enough to break
+			// connected socket reply filters.
+			nsock, err := net.ListenUDP("udp", nil)
+			if err != nil {
+				t.Errorf("can't create temporary reply socket: %v", err)
+			}
+			nsock.WriteTo(outBuf, addr)
+			nsock.Close()
+		}
+	}()
+
+	pdus := []SnmpPDU{{Name: ".1.2", Type: Null}}
+	// This is not actually a GetResponse, but we need something our test server can unmarshal.
+	reqPkt := x.mkSnmpPacket(GetResponse, pdus, 0, 0)
+
+	_, err = x.sendOneRequest(reqPkt, true)
+	if err != nil && enable {
+		t.Errorf("with unconnected socket enabled got unexpected error: %v", err)
+	} else if err == nil && !enable {
+		t.Errorf("with unconnected socket disabled didn't get an error")
 	}
 }
 
@@ -1634,7 +1989,7 @@ func dumpBytes1(data []byte, msg string, maxlength int) {
 	if len(data) < maxlength {
 		length = len(data)
 	}
-	length *= 2 //One Byte Symobls Two Hex
+	length *= 2 //One Byte Symbols Two Hex
 	hexStr := hex.EncodeToString(data)
 	for i := 0; length >= i+16; i += 16 {
 		buffer.WriteString("\n")
