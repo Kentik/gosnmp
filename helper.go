@@ -116,7 +116,7 @@ func (x *GoSNMP) decodeValue(data []byte, msg string) (retVal *variable, err err
 		x.logPrint("decodeValue: type is ObjectIdentifier")
 		rawOid, _, err := parseRawField(data, "OID")
 		if err != nil {
-			return nil, fmt.Errorf("Error parsing OID Value: %s", err.Error())
+			return nil, fmt.Errorf("error parsing OID value: bytes %x err: %s", data, err.Error())
 		}
 		var oid []int
 		var ok bool
@@ -582,7 +582,8 @@ func parseLength(bytes []byte) (length int, cursor int) {
 // that are assigned in a hierarchy.
 func parseObjectIdentifier(bytes []byte) (s []int, err error) {
 	if len(bytes) == 0 {
-		return []int{0}, nil
+		// change this to what's in gosnmp/gosnmp so we hit the error
+		return []int{0}, fmt.Errorf("invalid OID length")
 	}
 
 	// In the worst case, we get two elements from the first byte (which is
